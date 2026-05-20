@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agenda de Citas GoTo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1d2733;
+      --muted: #5d6978;
+      --line: #d9e0e8;
+      --brand: #147a7e;
+      --accent: #c7502f;
+      --surface: #f6f8fb;
+      --white: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #edf7f6 0%, var(--surface) 42%, #ffffff 100%);
+    }
+
+    main {
+      width: min(980px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 5vw, 48px);
+      letter-spacing: 0;
+    }
+
+    p {
+      color: var(--muted);
+      line-height: 1.5;
+      margin: 8px 0 0;
+    }
+
+    a {
+      color: var(--brand);
+      font-weight: 700;
+    }
+
+    .panel {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 16px 40px rgba(29, 39, 51, 0.08);
+      padding: 24px;
+    }
+
+    form {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    label {
+      display: grid;
+      gap: 8px;
+      font-weight: 700;
+    }
+
+    input,
+    select,
+    textarea,
+    button {
+      width: 100%;
+      font: inherit;
+      border-radius: 6px;
+    }
+
+    input,
+    select,
+    textarea {
+      border: 1px solid var(--line);
+      padding: 12px;
+      color: var(--ink);
+      background: #fff;
+    }
+
+    textarea,
+    .full { grid-column: 1 / -1; }
+
+    textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+
+    button {
+      border: 0;
+      background: var(--brand);
+      color: #fff;
+      padding: 13px 16px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:hover { background: #106669; }
+
+    .result {
+      display: none;
+      margin-top: 18px;
+      border-left: 4px solid var(--accent);
+      background: #fff7f4;
+      padding: 14px 16px;
+      border-radius: 6px;
+    }
+
+    .result.visible { display: block; }
+
+    @media (max-width: 700px) {
+      header,
+      form { grid-template-columns: 1fr; }
+
+      header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Agenda de Citas GoTo</h1>
+        <p>Registra una cita y recibe un folio de confirmacion para seguimiento por correo o WhatsApp.</p>
+      </div>
+      <a href="/admin.html">Panel interno</a>
+    </header>
+
+    <section class="panel">
+      <form id="appointmentForm">
+        <label>Nombre<input name="nombre" autocomplete="name" required></label>
+        <label>Telefono / WhatsApp<input name="telefono" autocomplete="tel" required></label>
+        <label>Correo<input name="correo" type="email" autocomplete="email" required></label>
+        <label>
+          Tipo de cita
+          <select name="tipo" required>
+            <option value="">Selecciona una opcion</option>
+            <option>Consulta inicial</option>
+            <option>Seguimiento</option>
+            <option>Soporte GoTo</option>
+            <option>Demo comercial</option>
+          </select>
+        </label>
+        <label>Fecha<input name="fecha" type="date" required></label>
+        <label>Hora<input name="hora" type="time" required></label>
+        <label class="full">Comentarios<textarea name="comentarios" placeholder="Cuentanos cualquier detalle util"></textarea></label>
+        <button class="full" type="submit">Registrar cita</button>
+      </form>
+      <div id="result" class="result" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.querySelector("#appointmentForm");
+    const result = document.querySelector("#result");
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const payload = Object.fromEntries(new FormData(form).entries());
+      result.className = "result visible";
+      result.textContent = "Registrando cita...";
+
+      try {
+        const response = await fetch("/api/citas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "No se pudo registrar la cita");
+        }
+
+        result.innerHTML = `
+          <strong>Cita registrada: ${data.folio}</strong><br>
+          ${data.nombre}, tu cita queda ${data.estatus} para el ${data.fecha} a las ${data.hora}.<br>
+          <a href="${data.whatsappUrl}" target="_blank" rel="noopener">Abrir confirmacion por WhatsApp</a>
+        `;
+        form.reset();
+      } catch (error) {
+        result.textContent = error.message;
+      }
+    });
+  </script>
+</body>
+</html>
