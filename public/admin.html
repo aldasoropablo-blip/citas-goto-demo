@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panel de Citas GoTo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1d2733;
+      --muted: #5d6978;
+      --line: #d9e0e8;
+      --brand: #147a7e;
+      --danger: #b83232;
+      --surface: #f6f8fb;
+      --white: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      background: var(--surface);
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0;
+    }
+
+    header,
+    .toolbar,
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header {
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 32px;
+      letter-spacing: 0;
+    }
+
+    a {
+      color: var(--brand);
+      font-weight: 700;
+    }
+
+    input,
+    select,
+    textarea,
+    button {
+      font: inherit;
+      border-radius: 6px;
+    }
+
+    input,
+    select,
+    textarea {
+      border: 1px solid var(--line);
+      padding: 10px;
+      color: var(--ink);
+      background: #fff;
+    }
+
+    button {
+      border: 0;
+      background: var(--brand);
+      color: #fff;
+      padding: 10px 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    button.secondary {
+      color: var(--ink);
+      background: #e8eef3;
+    }
+
+    button.danger { background: var(--danger); }
+
+    .toolbar {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 16px;
+    }
+
+    .toolbar input {
+      flex: 1;
+      min-width: 180px;
+    }
+
+    .list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .card {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .folio {
+      font-weight: 800;
+      color: var(--brand);
+    }
+
+    .status {
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(130px, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+
+    .grid label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .comments { grid-column: span 2; }
+
+    .empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 36px 12px;
+    }
+
+    @media (max-width: 900px) {
+      header,
+      .toolbar,
+      .card-head,
+      .actions {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .grid { grid-template-columns: 1fr; }
+      .comments { grid-column: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Panel de citas</h1>
+      <a href="/">Formulario publico</a>
+    </header>
+
+    <section class="toolbar">
+      <input id="search" placeholder="Buscar por folio, nombre, telefono o correo">
+      <button id="searchButton" type="button">Buscar</button>
+      <button id="clearButton" class="secondary" type="button">Limpiar</button>
+    </section>
+
+    <section id="list" class="list" aria-live="polite"></section>
+  </main>
+
+  <script>
+    const list = document.querySelector("#list");
+    const search = document.querySelector("#search");
+    const searchButton = document.querySelector("#searchButton");
+    const clearButton = document.querySelector("#clearButton");
+
+    searchButton.addEventListener("click", () => loadCitas(search.value));
+    clearButton.addEventListener("click", () => {
+      search.value = "";
+      loadCitas();
+    });
+    search.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        loadCitas(search.value);
+      }
+    });
+
+    async function loadCitas(q = "") {
+      const params = q ? `?q=${encodeURIComponent(q)}` : "";
+      list.innerHTML = '<div class="empty">Cargando citas...</div>';
+
+      try {
+        const response = await fetch(`/api/citas${params}`);
+        const citas = await response.json();
+        renderCitas(citas);
+      } catch (error) {
+        list.innerHTML = `<div class="empty">${error.message}</div>`;
+      }
+    }
+
+    function renderCitas(citas) {
+      if (!citas.length) {
+        list.innerHTML = '<div class="empty">No hay citas para mostrar.</div>';
+        return;
+      }
+
+      list.innerHTML = citas.map((cita) => `
+        <article class="card" data-folio="${cita.folio}">
+          <div class="card-head">
+            <div>
+              <div class="folio">${cita.folio}</div>
+              <strong>${escapeHtml(cita.nombre)}</strong>
+              <div>${escapeHtml(cita.telefono)} - ${escapeHtml(cita.correo)}</div>
+            </div>
+            <div class="status">${escapeHtml(cita.estatus)}</div>
+          </div>
+
+          <div class="grid">
+            <label>Fecha<input name="fecha" type="date" value="${escapeHtml(cita.fecha)}"></label>
+            <label>Hora<input name="hora" type="time" value="${escapeHtml(cita.hora)}"></label>
+            <label>
+              Tipo
+              <select name="tipo">
+                ${option("Consulta inicial", cita.tipo)}
+                ${option("Seguimiento", cita.tipo)}
+                ${option("Soporte GoTo", cita.tipo)}
+                ${option("Demo comercial", cita.tipo)}
+              </select>
+            </label>
+            <label>
+              Estatus
+              <select name="estatus">
+                ${option("Confirmada", cita.estatus)}
+                ${option("Reagendada", cita.estatus)}
+                ${option("Completada", cita.estatus)}
+                ${option("Cancelada", cita.estatus)}
+              </select>
+            </label>
+            <label class="comments">Comentarios<textarea name="comentarios">${escapeHtml(cita.comentarios || "")}</textarea></label>
+          </div>
+
+          <div class="actions" style="margin-top:12px">
+            <button type="button" onclick="saveCita('${cita.folio}')">Guardar cambios</button>
+            <button class="danger" type="button" onclick="cancelCita('${cita.folio}')">Cancelar cita</button>
+            <a href="${cita.whatsappUrl}" target="_blank" rel="noopener">WhatsApp</a>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    async function saveCita(folio) {
+      const card = document.querySelector(`[data-folio="${folio}"]`);
+      const payload = Object.fromEntries(new FormDataLike(card).entries());
+
+      await fetch(`/api/citas/${encodeURIComponent(folio)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      loadCitas(search.value);
+    }
+
+    async function cancelCita(folio) {
+      await fetch(`/api/citas/${encodeURIComponent(folio)}/cancelar`, {
+        method: "PATCH"
+      });
+
+      loadCitas(search.value);
+    }
+
+    function FormDataLike(root) {
+      const fields = root.querySelectorAll("input, select, textarea");
+      return {
+        entries() {
+          return Array.from(fields).map((field) => [field.name, field.value]);
+        }
+      };
+    }
+
+    function option(value, selected) {
+      return `<option ${value === selected ? "selected" : ""}>${escapeHtml(value)}</option>`;
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    loadCitas();
+  </script>
+</body>
+</html>
