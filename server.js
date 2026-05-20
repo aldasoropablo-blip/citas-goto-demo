@@ -5,6 +5,8 @@ const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// En esta demo las citas se guardan temporalmente en memoria.
+// Para produccion debe usarse una base persistente como PostgreSQL, Google Sheets, Airtable o CRM.
 const citas = [];
 let folioCounter = 1;
 
@@ -32,6 +34,16 @@ app.get("/api/citas", (req, res) => {
   res.json(filtered);
 });
 
+app.get("/api/citas/:folio", (req, res) => {
+  const cita = findCita(req.params.folio);
+
+  if (!cita) {
+    return res.status(404).json({ error: "Cita no encontrada" });
+  }
+
+  res.json(cita);
+});
+
 app.post("/api/citas", async (req, res) => {
   const { nombre, telefono, correo, tipo, fecha, hora, comentarios } = req.body;
 
@@ -42,6 +54,7 @@ app.post("/api/citas", async (req, res) => {
   }
 
   const cita = {
+    // El folio se genera en esta app externa; no vive en GoTo.
     folio: nextFolio(),
     nombre: clean(nombre),
     telefono: clean(telefono),
@@ -59,7 +72,7 @@ app.post("/api/citas", async (req, res) => {
   cita.whatsappUrl = buildWhatsAppUrl(cita);
   citas.push(cita);
 
-  await sendConfirmationEmail(cita);
+  cita.emailSent = await sendConfirmationEmail(cita);
 
   res.status(201).json(cita);
 });
@@ -119,10 +132,19 @@ function findCita(folio) {
 
 function buildWhatsAppUrl(cita) {
   const phone = cita.telefono.replace(/[^\d]/g, "");
-  const ivrLine = process.env.GOTO_IVR_PHONE
-    ? ` Para cambios, llama a GoTo: ${process.env.GOTO_IVR_PHONE}.`
-    : "";
-  const message = `Hola ${cita.nombre}, tu cita ${cita.folio} de ${cita.tipo} esta ${cita.estatus} para el ${cita.fecha} a las ${cita.hora}.${ivrLine}`;
+  // GoTo usa el folio solo como referencia durante la llamada o IVR.
+  const ivrLine = process.env.GOTO_IVR_PHONE ? ` Telefono IVR GoTo: ${process.env.GOTO_IVR_PHONE}.` : "";
+  const message = [
+    `Hola, ${cita.nombre}. Tu cita con Inmobiliaria Carvalho fue registrada correctamente.`,
+    "",
+    `Folio: ${cita.folio}`,
+    `Tipo de cita: ${cita.tipo}`,
+    `Fecha: ${cita.fecha}`,
+    `Hora: ${cita.hora}`,
+    "",
+    "Para reagendar, cancelar o hablar con un asesor, llama al IVR de GoTo y ten a la mano tu folio.",
+    ivrLine
+  ].filter(Boolean).join("\n");
 
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
@@ -132,7 +154,7 @@ async function sendConfirmationEmail(cita) {
 
   if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS || !FROM_EMAIL) {
     console.log(`Correo omitido para ${cita.folio}: variables SMTP incompletas.`);
-    return;
+    return false;
   }
 
   try {
@@ -153,7 +175,7 @@ async function sendConfirmationEmail(cita) {
       text: [
         `Hola ${cita.nombre},`,
         "",
-        `Tu cita ${cita.folio} de ${cita.tipo} esta ${cita.estatus}.`,
+        `Tu cita ${cita.folio} con Inmobiliaria Carvalho esta ${cita.estatus}.`,
         `Fecha: ${cita.fecha}`,
         `Hora: ${cita.hora}`,
         process.env.GOTO_IVR_PHONE ? `Telefono GoTo IVR: ${process.env.GOTO_IVR_PHONE}` : "",
@@ -161,7 +183,9 @@ async function sendConfirmationEmail(cita) {
         "Gracias."
       ].filter(Boolean).join("\n")
     });
+    return true;
   } catch (error) {
     console.error(`No se pudo enviar correo para ${cita.folio}:`, error.message);
+    return false;
   }
 }

@@ -3,311 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Panel de Citas GoTo</title>
+  <title>Panel del asesor inmobiliario</title>
   <style>
-    :root {
-      color-scheme: light;
-      --ink: #1d2733;
-      --muted: #5d6978;
-      --line: #d9e0e8;
-      --brand: #147a7e;
-      --danger: #b83232;
-      --surface: #f6f8fb;
-      --white: #ffffff;
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: Arial, Helvetica, sans-serif;
-      color: var(--ink);
-      background: var(--surface);
-    }
-
-    main {
-      width: min(1180px, calc(100% - 32px));
-      margin: 0 auto;
-      padding: 28px 0;
-    }
-
-    header,
-    .toolbar,
-    .actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    header {
-      justify-content: space-between;
-      margin-bottom: 20px;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 32px;
-      letter-spacing: 0;
-    }
-
-    a {
-      color: var(--brand);
-      font-weight: 700;
-    }
-
-    input,
-    select,
-    textarea,
-    button {
-      font: inherit;
-      border-radius: 6px;
-    }
-
-    input,
-    select,
-    textarea {
-      border: 1px solid var(--line);
-      padding: 10px;
-      color: var(--ink);
-      background: #fff;
-    }
-
-    button {
-      border: 0;
-      background: var(--brand);
-      color: #fff;
-      padding: 10px 12px;
-      font-weight: 700;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-
-    button.secondary {
-      color: var(--ink);
-      background: #e8eef3;
-    }
-
-    button.danger { background: var(--danger); }
-
-    .toolbar {
-      background: var(--white);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 14px;
-      margin-bottom: 16px;
-    }
-
-    .toolbar input {
-      flex: 1;
-      min-width: 180px;
-    }
-
-    .list {
-      display: grid;
-      gap: 12px;
-    }
-
-    .card {
-      background: var(--white);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 16px;
-    }
-
-    .card-head {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 12px;
-    }
-
-    .folio {
-      font-weight: 800;
-      color: var(--brand);
-    }
-
-    .status {
-      color: var(--muted);
-      font-weight: 700;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(130px, 1fr));
-      gap: 10px;
-      align-items: end;
-    }
-
-    .grid label {
-      display: grid;
-      gap: 6px;
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 700;
-    }
-
-    .comments { grid-column: span 2; }
-
-    .empty {
-      color: var(--muted);
-      text-align: center;
-      padding: 36px 12px;
-    }
-
-    @media (max-width: 900px) {
-      header,
-      .toolbar,
-      .card-head,
-      .actions {
-        align-items: stretch;
-        flex-direction: column;
-      }
-
-      .grid { grid-template-columns: 1fr; }
-      .comments { grid-column: auto; }
-    }
+    :root{--navy:#10233f;--gold:#c79a3b;--ink:#172033;--muted:#667085;--line:#dce2ea;--soft:#f4f6f9;--white:#fff;--green:#147a4f;--blue:#1d5fa7;--red:#b83232;--amber:#9a6a12}*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:Arial,Helvetica,sans-serif;color:var(--ink);background:var(--soft)}a{color:var(--navy);font-weight:800}.header{background:var(--navy);color:var(--white)}.header-inner,main{width:min(1180px,calc(100% - 32px));margin:0 auto}.header-inner{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:26px 0}h1,h2,h3,p{margin-top:0}h1{margin-bottom:6px;font-size:clamp(28px,4vw,42px);letter-spacing:0}.header p{margin-bottom:0;color:#d9e2ee}main{padding:26px 0 42px}.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:18px}.summary-card,.toolbar,.table-card,.mobile-card{border:1px solid var(--line);border-radius:8px;background:var(--white);box-shadow:0 14px 36px rgba(16,35,63,.08)}.summary-card{padding:18px;border-top:4px solid var(--gold)}.summary-card span{display:block;color:var(--muted);font-size:13px;font-weight:800;text-transform:uppercase}.summary-card strong{display:block;margin-top:8px;color:var(--navy);font-size:28px}.toolbar{display:flex;align-items:center;gap:12px;padding:16px;margin-bottom:18px}input,select,textarea,button{font:inherit;border-radius:6px}input,select,textarea{border:1px solid var(--line);padding:10px;color:var(--ink);background:#fff}.toolbar input{flex:1;min-width:220px}button{border:0;background:var(--navy);color:#fff;padding:10px 12px;font-weight:800;cursor:pointer;white-space:nowrap}button.secondary{color:var(--ink);background:#e8eef3}button.danger{background:var(--red)}button.confirm{background:var(--green)}.table-card{overflow:hidden}table{width:100%;border-collapse:collapse;background:#fff}th,td{border-bottom:1px solid var(--line);padding:12px;text-align:left;vertical-align:top}th{color:var(--navy);background:#f8fafc;font-size:13px;text-transform:uppercase}td input,td select,td textarea{width:100%;min-width:120px}td textarea{min-width:180px;min-height:72px;resize:vertical}.folio{color:var(--navy);font-weight:800}.muted{color:var(--muted);line-height:1.5}.badge{display:inline-flex;align-items:center;min-height:26px;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:800;background:#eef2f7;color:var(--muted)}.badge.confirmada{background:#e9f7f0;color:var(--green)}.badge.pendiente{background:#fff6df;color:var(--amber)}.badge.reagendada{background:#eaf2fc;color:var(--blue)}.badge.cancelada{background:#fdecec;color:var(--red)}.actions{display:grid;gap:8px;min-width:150px}.empty{color:var(--muted);text-align:center;padding:36px 12px}.cards-list{display:none}@media(max-width:980px){.header-inner,.toolbar{align-items:stretch;flex-direction:column}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.table-card{display:none}.cards-list{display:grid;gap:14px}.mobile-card{padding:16px}.mobile-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px}.mobile-grid label{display:grid;gap:6px;color:var(--muted);font-weight:800}}@media(max-width:620px){.summary-grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
+  <header class="header"><div class="header-inner"><div><h1>Panel del asesor inmobiliario</h1><p>Busca folios generados por la app externa y gestiona visitas de Inmobiliaria Carvalho.</p></div><a href="/" style="color:#ffe2a3">Volver a la landing</a></div></header>
   <main>
-    <header>
-      <h1>Panel de citas</h1>
-      <a href="/">Formulario publico</a>
-    </header>
-
-    <section class="toolbar">
-      <input id="search" placeholder="Buscar por folio, nombre, telefono o correo">
-      <button id="searchButton" type="button">Buscar</button>
-      <button id="clearButton" class="secondary" type="button">Limpiar</button>
-    </section>
-
-    <section id="list" class="list" aria-live="polite"></section>
+    <section class="summary-grid" aria-label="Resumen de citas"><div class="summary-card"><span>Total</span><strong id="totalCount">0</strong></div><div class="summary-card"><span>Confirmadas</span><strong id="confirmedCount">0</strong></div><div class="summary-card"><span>Reagendadas</span><strong id="rescheduledCount">0</strong></div><div class="summary-card"><span>Canceladas</span><strong id="cancelledCount">0</strong></div></section>
+    <section class="toolbar"><input id="search" placeholder="Buscar cita por folio, nombre, teléfono o correo"><button id="searchButton" type="button">Buscar</button><button id="clearButton" class="secondary" type="button">Limpiar</button></section>
+    <section id="tableHost" class="table-card" aria-live="polite"></section><section id="cardsHost" class="cards-list" aria-live="polite"></section>
   </main>
-
   <script>
-    const list = document.querySelector("#list");
-    const search = document.querySelector("#search");
-    const searchButton = document.querySelector("#searchButton");
-    const clearButton = document.querySelector("#clearButton");
-
-    searchButton.addEventListener("click", () => loadCitas(search.value));
-    clearButton.addEventListener("click", () => {
-      search.value = "";
-      loadCitas();
-    });
-    search.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        loadCitas(search.value);
-      }
-    });
-
-    async function loadCitas(q = "") {
-      const params = q ? `?q=${encodeURIComponent(q)}` : "";
-      list.innerHTML = '<div class="empty">Cargando citas...</div>';
-
-      try {
-        const response = await fetch(`/api/citas${params}`);
-        const citas = await response.json();
-        renderCitas(citas);
-      } catch (error) {
-        list.innerHTML = `<div class="empty">${error.message}</div>`;
-      }
-    }
-
-    function renderCitas(citas) {
-      if (!citas.length) {
-        list.innerHTML = '<div class="empty">No hay citas para mostrar.</div>';
-        return;
-      }
-
-      list.innerHTML = citas.map((cita) => `
-        <article class="card" data-folio="${cita.folio}">
-          <div class="card-head">
-            <div>
-              <div class="folio">${cita.folio}</div>
-              <strong>${escapeHtml(cita.nombre)}</strong>
-              <div>${escapeHtml(cita.telefono)} - ${escapeHtml(cita.correo)}</div>
-            </div>
-            <div class="status">${escapeHtml(cita.estatus)}</div>
-          </div>
-
-          <div class="grid">
-            <label>Fecha<input name="fecha" type="date" value="${escapeHtml(cita.fecha)}"></label>
-            <label>Hora<input name="hora" type="time" value="${escapeHtml(cita.hora)}"></label>
-            <label>
-              Tipo
-              <select name="tipo">
-                ${option("Consulta inicial", cita.tipo)}
-                ${option("Seguimiento", cita.tipo)}
-                ${option("Soporte GoTo", cita.tipo)}
-                ${option("Demo comercial", cita.tipo)}
-              </select>
-            </label>
-            <label>
-              Estatus
-              <select name="estatus">
-                ${option("Confirmada", cita.estatus)}
-                ${option("Reagendada", cita.estatus)}
-                ${option("Completada", cita.estatus)}
-                ${option("Cancelada", cita.estatus)}
-              </select>
-            </label>
-            <label class="comments">Comentarios<textarea name="comentarios">${escapeHtml(cita.comentarios || "")}</textarea></label>
-          </div>
-
-          <div class="actions" style="margin-top:12px">
-            <button type="button" onclick="saveCita('${cita.folio}')">Guardar cambios</button>
-            <button class="danger" type="button" onclick="cancelCita('${cita.folio}')">Cancelar cita</button>
-            <a href="${cita.whatsappUrl}" target="_blank" rel="noopener">WhatsApp</a>
-          </div>
-        </article>
-      `).join("");
-    }
-
-    async function saveCita(folio) {
-      const card = document.querySelector(`[data-folio="${folio}"]`);
-      const payload = Object.fromEntries(new FormDataLike(card).entries());
-
-      await fetch(`/api/citas/${encodeURIComponent(folio)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      loadCitas(search.value);
-    }
-
-    async function cancelCita(folio) {
-      await fetch(`/api/citas/${encodeURIComponent(folio)}/cancelar`, {
-        method: "PATCH"
-      });
-
-      loadCitas(search.value);
-    }
-
-    function FormDataLike(root) {
-      const fields = root.querySelectorAll("input, select, textarea");
-      return {
-        entries() {
-          return Array.from(fields).map((field) => [field.name, field.value]);
-        }
-      };
-    }
-
-    function option(value, selected) {
-      return `<option ${value === selected ? "selected" : ""}>${escapeHtml(value)}</option>`;
-    }
-
-    function escapeHtml(value) {
-      return String(value || "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
+    const tableHost=document.querySelector("#tableHost"),cardsHost=document.querySelector("#cardsHost"),search=document.querySelector("#search"),searchButton=document.querySelector("#searchButton"),clearButton=document.querySelector("#clearButton"),totalCount=document.querySelector("#totalCount"),confirmedCount=document.querySelector("#confirmedCount"),rescheduledCount=document.querySelector("#rescheduledCount"),cancelledCount=document.querySelector("#cancelledCount");
+    searchButton.addEventListener("click",()=>loadCitas(search.value));clearButton.addEventListener("click",()=>{search.value="";loadCitas()});search.addEventListener("keydown",event=>{if(event.key==="Enter")loadCitas(search.value)});
+    async function loadCitas(q=""){const params=q?`?q=${encodeURIComponent(q)}`:"";tableHost.innerHTML='<div class="empty">Cargando citas...</div>';cardsHost.innerHTML='<div class="empty">Cargando citas...</div>';try{const response=await fetch(`/api/citas${params}`);const citas=await response.json();renderSummary(citas);renderCitas(citas)}catch(error){tableHost.innerHTML=`<div class="empty">${error.message}</div>`;cardsHost.innerHTML=`<div class="empty">${error.message}</div>`}}
+    function renderSummary(citas){totalCount.textContent=citas.length;confirmedCount.textContent=citas.filter(c=>c.estatus==="Confirmada").length;rescheduledCount.textContent=citas.filter(c=>c.estatus==="Reagendada").length;cancelledCount.textContent=citas.filter(c=>c.estatus==="Cancelada").length}
+    function renderCitas(citas){if(!citas.length){tableHost.innerHTML='<div class="empty">No hay citas para mostrar.</div>';cardsHost.innerHTML='<div class="empty">No hay citas para mostrar.</div>';return}tableHost.innerHTML=`<table><thead><tr><th>Folio</th><th>Cliente</th><th>Reagendar visita</th><th>Tipo</th><th>Estatus</th><th>Comentarios</th><th>Acciones</th></tr></thead><tbody>${citas.map(renderRow).join("")}</tbody></table>`;cardsHost.innerHTML=citas.map(renderCard).join("")}
+    function renderRow(cita){return `<tr data-folio="${cita.folio}"><td><span class="folio">${cita.folio}</span><br><span class="badge ${statusClass(cita.estatus)}">${escapeHtml(cita.estatus)}</span></td><td><strong>${escapeHtml(cita.nombre)}</strong><br><span class="muted">${escapeHtml(cita.telefono)}<br>${escapeHtml(cita.correo)}</span></td><td><input name="fecha" type="date" value="${escapeHtml(cita.fecha)}"><br><br><input name="hora" type="time" value="${escapeHtml(cita.hora)}"></td><td><select name="tipo">${typeOptions(cita.tipo)}</select></td><td><select name="estatus">${statusOptions(cita.estatus)}</select></td><td><textarea name="comentarios">${escapeHtml(cita.comentarios||"")}</textarea></td><td>${actions(cita.folio)}</td></tr>`}
+    function renderCard(cita){return `<article class="mobile-card" data-folio="${cita.folio}"><div class="folio">${cita.folio}</div><strong>${escapeHtml(cita.nombre)}</strong><p class="muted">${escapeHtml(cita.telefono)} · ${escapeHtml(cita.correo)}</p><span class="badge ${statusClass(cita.estatus)}">${escapeHtml(cita.estatus)}</span><div class="mobile-grid"><label>Reagendar visita<input name="fecha" type="date" value="${escapeHtml(cita.fecha)}"></label><label>Hora<input name="hora" type="time" value="${escapeHtml(cita.hora)}"></label><label>Tipo<select name="tipo">${typeOptions(cita.tipo)}</select></label><label>Estatus<select name="estatus">${statusOptions(cita.estatus)}</select></label><label>Comentarios<textarea name="comentarios">${escapeHtml(cita.comentarios||"")}</textarea></label>${actions(cita.folio)}</div></article>`}
+    function actions(folio){return `<div class="actions"><button type="button" onclick="saveCita('${folio}')">Reagendar visita</button><button class="confirm" type="button" onclick="confirmCita('${folio}')">Confirmar asistencia</button><button class="danger" type="button" onclick="cancelCita('${folio}')">Cancelar visita</button></div>`}
+    async function saveCita(folio){const container=document.querySelector(`[data-folio="${folio}"]`),payload=Object.fromEntries(new FormDataLike(container).entries());await fetch(`/api/citas/${encodeURIComponent(folio)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});loadCitas(search.value)}
+    async function confirmCita(folio){const container=document.querySelector(`[data-folio="${folio}"]`),payload=Object.fromEntries(new FormDataLike(container).entries());payload.estatus="Confirmada";await fetch(`/api/citas/${encodeURIComponent(folio)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});loadCitas(search.value)}
+    async function cancelCita(folio){await fetch(`/api/citas/${encodeURIComponent(folio)}/cancelar`,{method:"PATCH"});loadCitas(search.value)}
+    function FormDataLike(root){const fields=root.querySelectorAll("input, select, textarea");return{entries(){return Array.from(fields).map(field=>[field.name,field.value])}}}
+    function typeOptions(selected){return["Visita a propiedad","Tour virtual","Asesoría hipotecaria","Firma de contrato","Consulta de renta","Consulta de venta"].map(value=>option(value,selected)).join("")}
+    function statusOptions(selected){return["Pendiente","Confirmada","Reagendada","Cancelada"].map(value=>option(value,selected)).join("")}
+    function option(value,selected){return `<option ${value===selected?"selected":""}>${escapeHtml(value)}</option>`}
+    function statusClass(value){return String(value||"Pendiente").toLowerCase()}
+    function escapeHtml(value){return String(value||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
     loadCitas();
   </script>
 </body>
