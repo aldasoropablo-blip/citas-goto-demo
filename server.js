@@ -72,7 +72,7 @@ app.post("/api/citas", async (req, res) => {
   cita.whatsappUrl = buildWhatsAppUrl(cita);
   citas.push(cita);
 
-  cita.emailSent = await sendConfirmationEmail(cita);
+  cita.emailSent = await sendAppointmentEmails(cita);
 
   res.status(201).json(cita);
 });
@@ -149,7 +149,7 @@ function buildWhatsAppUrl(cita) {
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
-async function sendConfirmationEmail(cita) {
+async function sendAppointmentEmails(cita) {
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL } = process.env;
 
   if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS || !FROM_EMAIL) {
@@ -168,16 +168,29 @@ async function sendConfirmationEmail(cita) {
       }
     });
 
+    const customerEmailSent = await sendCustomerConfirmation(transporter, cita, FROM_EMAIL);
+    await sendInternalNotification(transporter, cita, FROM_EMAIL);
+    return customerEmailSent;
+  } catch (error) {
+    console.error(`No se pudo completar el envio de correo para ${cita.folio}:`, error.message);
+    return false;
+  }
+}
+
+async function sendCustomerConfirmation(transporter, cita, fromEmail) {
+  try {
     await transporter.sendMail({
-      from: FROM_EMAIL,
+      from: fromEmail,
       to: cita.correo,
       subject: `Confirmacion de cita ${cita.folio}`,
       text: [
-        `Hola ${cita.nombre},`,
-        "",
-        `Tu cita ${cita.folio} con Inmobiliaria Carvalho esta ${cita.estatus}.`,
+        `Nombre: ${cita.nombre}`,
+        `Folio: ${cita.folio}`,
+        `Tipo de cita: ${cita.tipo}`,
         `Fecha: ${cita.fecha}`,
         `Hora: ${cita.hora}`,
+        "",
+        "Conserva tu folio. Lo necesitaras si llamas al IVR de GoTo para reagendar, cancelar o confirmar tu visita.",
         process.env.GOTO_IVR_PHONE ? `Telefono GoTo IVR: ${process.env.GOTO_IVR_PHONE}` : "",
         "",
         "Gracias."
@@ -185,7 +198,35 @@ async function sendConfirmationEmail(cita) {
     });
     return true;
   } catch (error) {
-    console.error(`No se pudo enviar correo para ${cita.folio}:`, error.message);
+    console.error(`No se pudo enviar correo al cliente para ${cita.folio}:`, error.message);
     return false;
+  }
+}
+
+async function sendInternalNotification(transporter, cita, fromEmail) {
+  if (!process.env.INTERNAL_NOTIFY_EMAIL) {
+    return;
+  }
+
+  try {
+    await transporter.sendMail({
+      from: fromEmail,
+      to: process.env.INTERNAL_NOTIFY_EMAIL,
+      subject: `Nueva cita inmobiliaria ${cita.folio}`,
+      text: [
+        `Folio: ${cita.folio}`,
+        `Nombre del cliente: ${cita.nombre}`,
+        `Telefono: ${cita.telefono}`,
+        `Correo: ${cita.correo}`,
+        `Tipo de cita: ${cita.tipo}`,
+        `Fecha: ${cita.fecha}`,
+        `Hora: ${cita.hora}`,
+        `Comentarios: ${cita.comentarios || "Sin comentarios"}`,
+        `Estatus: ${cita.estatus}`,
+        `Fecha de creacion: ${cita.createdAt}`
+      ].join("\n")
+    });
+  } catch (error) {
+    console.error(`No se pudo enviar notificacion interna para ${cita.folio}:`, error.message);
   }
 }
