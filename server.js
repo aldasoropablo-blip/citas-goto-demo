@@ -205,9 +205,111 @@ app.patch("/api/ivr/citas/:folio/reagendar", async (req, res) => {
   });
 });
 
+app.get("/api/ivr/clientes/:telefono/cita", (req, res) => {
+  const cita = findLatestCitaByTelefono(req.params.telefono);
+
+  if (!cita) {
+    return res.json(phoneIvrNotFound());
+  }
+
+  res.json(toPhoneIvrCitaResponse(cita, req.params.telefono));
+});
+
+app.patch("/api/ivr/clientes/:telefono/cita/confirmar", async (req, res) => {
+  const cita = findLatestCitaByTelefono(req.params.telefono);
+
+  if (!cita) {
+    return res.json(phoneIvrNotFound());
+  }
+
+  cita.estatus = "Confirmada";
+  cita.updatedAt = new Date().toISOString();
+  cita.whatsappUrl = buildWhatsAppUrl(cita);
+
+  await sendIvrActionEmails(cita, "confirmar", "Tu cita fue confirmada correctamente.");
+
+  res.json({
+    ok: true,
+    found: true,
+    action: "confirmar",
+    telefono: clean(req.params.telefono),
+    folio: cita.folio,
+    estatus: cita.estatus,
+    message: "Tu cita fue confirmada correctamente."
+  });
+});
+
+app.patch("/api/ivr/clientes/:telefono/cita/cancelar", async (req, res) => {
+  const cita = findLatestCitaByTelefono(req.params.telefono);
+
+  if (!cita) {
+    return res.json(phoneIvrNotFound());
+  }
+
+  cita.estatus = "Cancelada";
+  cita.updatedAt = new Date().toISOString();
+  cita.whatsappUrl = buildWhatsAppUrl(cita);
+
+  await sendIvrActionEmails(cita, "cancelar", "Tu cita fue cancelada correctamente.");
+
+  res.json({
+    ok: true,
+    found: true,
+    action: "cancelar",
+    telefono: clean(req.params.telefono),
+    folio: cita.folio,
+    estatus: cita.estatus,
+    message: "Tu cita fue cancelada correctamente."
+  });
+});
+
+app.patch("/api/ivr/clientes/:telefono/cita/reagendar", async (req, res) => {
+  const cita = findLatestCitaByTelefono(req.params.telefono);
+  const fecha = clean(req.body.fecha);
+  const hora = clean(req.body.hora);
+
+  if (!cita) {
+    return res.json(phoneIvrNotFound());
+  }
+
+  if (!fecha || !hora) {
+    return res.status(400).json({
+      ok: false,
+      error: "fecha y hora son obligatorias"
+    });
+  }
+
+  cita.fecha = fecha;
+  cita.hora = hora;
+  cita.estatus = "Reagendada";
+  cita.updatedAt = new Date().toISOString();
+  cita.whatsappUrl = buildWhatsAppUrl(cita);
+
+  await sendIvrActionEmails(cita, "reagendar", "Tu cita fue reagendada correctamente.");
+
+  res.json({
+    ok: true,
+    found: true,
+    action: "reagendar",
+    telefono: clean(req.params.telefono),
+    folio: cita.folio,
+    fecha: cita.fecha,
+    hora: cita.hora,
+    estatus: cita.estatus,
+    message: "Tu cita fue reagendada correctamente."
+  });
+});
+
+app.get("/api/ivr/propiedades/horarios", (req, res) => {
+  res.json({
+    ok: true,
+    propiedades: getIvrPropertySchedules()
+  });
+});
+
 app.post("/api/ivr/solicitudes", async (req, res) => {
   const telefono = clean(req.body.telefono);
-  const propiedad = clean(req.body.propiedad) || "No especificada";
+  const propiedad = normalizePropertyInterest(req.body.propiedad);
   const origen = clean(req.body.origen) || "GoTo IVR";
 
   if (!telefono) {
@@ -248,8 +350,34 @@ function clean(value) {
   return String(value || "").trim();
 }
 
+function normalizePhone(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function comparablePhone(value) {
+  const phone = normalizePhone(value);
+  return phone.length > 10 ? phone.slice(-10) : phone;
+}
+
+function phonesMatch(left, right) {
+  const leftPhone = normalizePhone(left);
+  const rightPhone = normalizePhone(right);
+
+  if (!leftPhone || !rightPhone) {
+    return false;
+  }
+
+  return leftPhone === rightPhone || comparablePhone(leftPhone) === comparablePhone(rightPhone);
+}
+
 function findCita(folio) {
   return citas.find((cita) => cita.folio.toLowerCase() === String(folio).toLowerCase());
+}
+
+function findLatestCitaByTelefono(telefono) {
+  return citas
+    .filter((cita) => phonesMatch(cita.telefono, telefono))
+    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))[0] || null;
 }
 
 function ivrNotFound() {
@@ -257,6 +385,14 @@ function ivrNotFound() {
     ok: true,
     found: false,
     message: "No encontramos una cita con ese folio."
+  };
+}
+
+function phoneIvrNotFound() {
+  return {
+    ok: true,
+    found: false,
+    message: "No encontramos una cita asociada a ese numero telefonico."
   };
 }
 
@@ -273,6 +409,63 @@ function toIvrCitaResponse(cita) {
     hora: cita.hora,
     estatus: cita.estatus
   };
+}
+
+function toPhoneIvrCitaResponse(cita, telefono) {
+  return {
+    ok: true,
+    found: true,
+    telefono: clean(telefono),
+    folio: cita.folio,
+    nombre: cita.nombre,
+    correo: cita.correo,
+    tipo: cita.tipo,
+    fecha: cita.fecha,
+    hora: cita.hora,
+    estatus: cita.estatus
+  };
+}
+
+function getIvrPropertySchedules() {
+  return [
+    {
+      id: "1",
+      nombre: "Departamento en Polanco",
+      disponible: true,
+      horarios: ["13:00"]
+    },
+    {
+      id: "2",
+      nombre: "Casa en Coyoacan",
+      disponible: true,
+      horarios: ["15:00"]
+    },
+    {
+      id: "3",
+      nombre: "Oficina en Santa Fe",
+      disponible: true,
+      horarios: ["17:00"]
+    },
+    {
+      id: "4",
+      nombre: "Penthouse en Interlomas",
+      disponible: false,
+      horarios: [],
+      message: "Agenda llena"
+    }
+  ];
+}
+
+function normalizePropertyInterest(value) {
+  const propiedad = clean(value);
+  const propertyMap = {
+    1: "Departamento en Polanco",
+    2: "Casa en Coyoacan",
+    3: "Oficina en Santa Fe",
+    4: "Penthouse en Interlomas"
+  };
+
+  return propertyMap[propiedad] || propiedad || "No especificada";
 }
 
 function createSmtpTransporter() {
@@ -345,6 +538,10 @@ async function sendIvrActionEmails(cita, action, message) {
 }
 
 async function sendIvrCustomerEmail(transporter, cita, fromEmail, action, message) {
+  if (!cita.correo) {
+    return;
+  }
+
   try {
     await transporter.sendMail({
       from: fromEmail,
