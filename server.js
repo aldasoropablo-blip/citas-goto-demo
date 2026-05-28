@@ -1,6 +1,7 @@
 const express = require("express");
 const nodemailer = require("nodemailer");
 const path = require("path");
+const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,6 +11,17 @@ const PORT = process.env.PORT || 3000;
 const citas = [];
 const solicitudesIvr = [];
 let folioCounter = 1;
+
+const CALENDAR_TIMEZONE = "America/Mexico_City";
+const APPOINTMENT_MINUTES = 60;
+const BUFFER_MINUTES = 60;
+const BASE_HOURS = ["13:00", "15:00", "17:00"];
+const CALENDAR_PROPERTIES = [
+  "Departamento en Polanco",
+  "Casa en Coyoacan",
+  "Oficina en Santa Fe",
+  "Penthouse en Interlomas"
+];
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -54,26 +66,7 @@ app.post("/api/citas", async (req, res) => {
     });
   }
 
-  const cita = {
-    // El folio se genera en esta app externa; no vive en GoTo.
-    folio: nextFolio(),
-    nombre: clean(nombre),
-    telefono: clean(telefono),
-    correo: clean(correo),
-    tipo: clean(tipo),
-    fecha: clean(fecha),
-    hora: clean(hora),
-    comentarios: clean(comentarios),
-    estatus: "Confirmada",
-    whatsappUrl: "",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-
-  cita.whatsappUrl = buildWhatsAppUrl(cita);
-  citas.push(cita);
-
-  cita.emailSent = await sendAppointmentEmails(cita);
+  const cita = await createAppointment(req.body);
 
   res.status(201).json(cita);
 });
@@ -307,6 +300,70 @@ app.get("/api/ivr/propiedades/horarios", (req, res) => {
   });
 });
 
+app.get("/api/calendar/availability", async (req, res) => {
+  const fecha = clean(req.query.fecha) || todayInCalendarTimezone();
+
+  try {
+    const availability = await getCalendarAvailability(fecha);
+    res.json(availability);
+  } catch (error) {
+    console.error("Disponibilidad de Calendar no disponible:", error.message);
+    res.status(503).json({
+      ok: false,
+      message: "Disponibilidad temporalmente no disponible."
+    });
+  }
+});
+
+app.post("/api/calendar/book", async (req, res) => {
+  const nombre = clean(req.body.nombre);
+  const telefono = clean(req.body.telefono);
+  const correo = clean(req.body.correo);
+  const propiedad = clean(req.body.propiedad);
+  const fecha = clean(req.body.fecha);
+  const hora = clean(req.body.hora);
+
+  if (!nombre || !telefono || !correo || !propiedad || !fecha || !hora) {
+    return res.status(400).json({
+      error: "nombre, telefono, correo, propiedad, fecha y hora son obligatorios"
+    });
+  }
+
+  try {
+    const availability = await getCalendarAvailability(fecha);
+
+    if (!isSlotAvailable(availability, propiedad, hora)) {
+      return res.status(409).json({
+        error: "Ese horario acaba de ocuparse. Por favor selecciona otro horario disponible."
+      });
+    }
+
+    await createCalendarEvent({
+      nombre,
+      telefono,
+      correo,
+      fecha,
+      hora,
+      comentarios: clean(req.body.comentarios)
+    }, propiedad);
+
+    const cita = await createAppointment({
+      ...req.body,
+      tipo: clean(req.body.tipo) || "Visita a propiedad",
+      comentarios: appendPropertyToComments(req.body.comentarios, propiedad),
+      propiedad
+    });
+
+    res.status(201).json(cita);
+  } catch (error) {
+    console.error("No se pudo reservar en Google Calendar:", error.message);
+    res.status(503).json({
+      ok: false,
+      message: "Disponibilidad temporalmente no disponible."
+    });
+  }
+});
+
 app.post("/api/ivr/solicitudes", async (req, res) => {
   const telefono = clean(req.body.telefono);
   const propiedad = normalizePropertyInterest(req.body.propiedad);
@@ -348,6 +405,31 @@ function nextFolio() {
 
 function clean(value) {
   return String(value || "").trim();
+}
+
+async function createAppointment(payload) {
+  const cita = {
+    // El folio se genera en esta app externa; no vive en GoTo.
+    folio: nextFolio(),
+    nombre: clean(payload.nombre),
+    telefono: clean(payload.telefono),
+    correo: clean(payload.correo),
+    tipo: clean(payload.tipo),
+    propiedad: clean(payload.propiedad),
+    fecha: clean(payload.fecha),
+    hora: clean(payload.hora),
+    comentarios: clean(payload.comentarios),
+    estatus: "Confirmada",
+    whatsappUrl: "",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  cita.whatsappUrl = buildWhatsAppUrl(cita);
+  citas.push(cita);
+  cita.emailSent = await sendAppointmentEmails(cita);
+
+  return cita;
 }
 
 function normalizePhone(value) {
@@ -466,6 +548,228 @@ function normalizePropertyInterest(value) {
   };
 
   return propertyMap[propiedad] || propiedad || "No especificada";
+}
+
+function todayInCalendarTimezone() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: CALENDAR_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+}
+
+function appendPropertyToComments(comentarios, propiedad) {
+  const base = clean(comentarios);
+  const propertyLine = `Propiedad: ${propiedad}`;
+  return base ? `${propertyLine}\n${base}` : propertyLine;
+}
+
+async function getCalendarAvailability(fecha) {
+  ensureCalendarConfig();
+
+  const events = await fetchCalendarEvents(fecha);
+  const properties = CALENDAR_PROPERTIES.map((nombre) => {
+    const slots = BASE_HOURS.map((hora) => buildAvailabilitySlot(fecha, hora, events));
+    const agendaLlena = slots.every((slot) => slot.status !== "disponible");
+
+    return {
+      nombre,
+      agendaLlena,
+      slots
+    };
+  });
+
+  return {
+    ok: true,
+    fecha,
+    timezone: CALENDAR_TIMEZONE,
+    properties
+  };
+}
+
+function buildAvailabilitySlot(fecha, hora, events) {
+  const start = slotDate(fecha, hora);
+  const end = addMinutes(start, APPOINTMENT_MINUTES);
+  const occupied = events.some((event) => rangesOverlap(start, end, event.start, event.end));
+
+  if (occupied) {
+    return {
+      hora,
+      status: "ocupado",
+      label: "Ocupado",
+      available: false
+    };
+  }
+
+  const blockedByBuffer = events.some((event) => {
+    const beforeStart = addMinutes(event.start, -BUFFER_MINUTES);
+    const afterEnd = addMinutes(event.end, BUFFER_MINUTES);
+    return rangesOverlap(start, end, beforeStart, event.start) || rangesOverlap(start, end, event.end, afterEnd);
+  });
+
+  if (blockedByBuffer) {
+    return {
+      hora,
+      status: "buffer",
+      label: "No disponible",
+      available: false
+    };
+  }
+
+  return {
+    hora,
+    status: "disponible",
+    label: "Disponible",
+    available: true
+  };
+}
+
+function isSlotAvailable(availability, propiedad, hora) {
+  const property = availability.properties.find((item) => item.nombre.toLowerCase() === clean(propiedad).toLowerCase());
+  const slot = property && property.slots.find((item) => item.hora === hora);
+  return Boolean(slot && slot.available);
+}
+
+async function fetchCalendarEvents(fecha) {
+  const token = await getGoogleAccessToken();
+  const calendarId = encodeURIComponent(process.env.GOOGLE_CALENDAR_ID);
+  const params = new URLSearchParams({
+    singleEvents: "true",
+    orderBy: "startTime",
+    timeMin: `${fecha}T00:00:00-06:00`,
+    timeMax: `${fecha}T23:59:59-06:00`
+  });
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events?${params.toString()}`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google Calendar respondio ${response.status}`);
+  }
+
+  const data = await response.json();
+  return (data.items || [])
+    .filter((event) => event.start && event.end && event.start.dateTime && event.end.dateTime)
+    .map((event) => ({
+      start: new Date(event.start.dateTime),
+      end: new Date(event.end.dateTime)
+    }));
+}
+
+async function createCalendarEvent(cita, propiedad) {
+  ensureCalendarConfig();
+
+  const token = await getGoogleAccessToken();
+  const calendarId = encodeURIComponent(process.env.GOOGLE_CALENDAR_ID);
+  const startDate = slotDate(cita.fecha, cita.hora);
+  const endDate = addMinutes(startDate, APPOINTMENT_MINUTES);
+  const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      summary: `Visita Carvalho - ${propiedad}`,
+      description: [
+        `Nombre: ${cita.nombre}`,
+        `Telefono: ${cita.telefono}`,
+        `Correo: ${cita.correo}`,
+        `Propiedad: ${propiedad}`,
+        cita.comentarios ? `Comentarios: ${cita.comentarios}` : ""
+      ].filter(Boolean).join("\n"),
+      start: {
+        dateTime: toCalendarDateTime(startDate),
+        timeZone: CALENDAR_TIMEZONE
+      },
+      end: {
+        dateTime: toCalendarDateTime(endDate),
+        timeZone: CALENDAR_TIMEZONE
+      }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google Calendar no creo el evento: ${response.status}`);
+  }
+}
+
+function ensureCalendarConfig() {
+  if (!process.env.GOOGLE_CALENDAR_ID || !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
+    throw new Error("Google Calendar no configurado");
+  }
+}
+
+async function getGoogleAccessToken() {
+  const now = Math.floor(Date.now() / 1000);
+  const header = {
+    alg: "RS256",
+    typ: "JWT"
+  };
+  const payload = {
+    iss: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    scope: "https://www.googleapis.com/auth/calendar",
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600
+  };
+  const unsignedToken = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(payload))}`;
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n");
+  const signature = crypto.createSign("RSA-SHA256").update(unsignedToken).sign(privateKey);
+  const assertion = `${unsignedToken}.${base64Url(signature)}`;
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google OAuth respondio ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.access_token;
+}
+
+function base64Url(value) {
+  const buffer = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  return buffer.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+function slotDate(fecha, hora) {
+  return new Date(`${fecha}T${hora}:00-06:00`);
+}
+
+function addMinutes(date, minutes) {
+  return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+function rangesOverlap(leftStart, leftEnd, rightStart, rightEnd) {
+  return leftStart < rightEnd && leftEnd > rightStart;
+}
+
+function toCalendarDateTime(date) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: CALENDAR_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
 function createSmtpTransporter() {
@@ -636,6 +940,7 @@ async function sendCustomerConfirmation(transporter, cita, fromEmail) {
         `Nombre: ${cita.nombre}`,
         `Folio: ${cita.folio}`,
         `Tipo de cita: ${cita.tipo}`,
+        cita.propiedad ? `Propiedad: ${cita.propiedad}` : "",
         `Fecha: ${cita.fecha}`,
         `Hora: ${cita.hora}`,
         "",
@@ -668,6 +973,7 @@ async function sendInternalNotification(transporter, cita, fromEmail) {
         `Telefono: ${cita.telefono}`,
         `Correo: ${cita.correo}`,
         `Tipo de cita: ${cita.tipo}`,
+        cita.propiedad ? `Propiedad: ${cita.propiedad}` : "",
         `Fecha: ${cita.fecha}`,
         `Hora: ${cita.hora}`,
         `Comentarios: ${cita.comentarios || "Sin comentarios"}`,
