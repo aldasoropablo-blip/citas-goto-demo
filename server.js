@@ -11,7 +11,6 @@ let folioCounter = 1;
 
 const CALENDAR_TIMEZONE = "America/Mexico_City";
 const APPOINTMENT_MINUTES = 60;
-const BUFFER_MINUTES = 60;
 const BASE_HOURS = ["13:00", "15:00", "17:00"];
 const PROPERTY_DETAILS = [
   { id: "1", nombre: "Departamento en Polanco", ubicacion: "Campos Eliseos, Polanco, Miguel Hidalgo, CDMX", tipo: "Departamento residencial premium", precio: "$5,800,000 MXN", horario: "13:00" },
@@ -211,7 +210,7 @@ async function getCalendarAvailability(fecha) {
   const properties = CALENDAR_PROPERTIES.map((nombre) => { const detail = findPropertyDetails(nombre); const slots = BASE_HOURS.map((hora) => buildAvailabilitySlot(fecha, hora, events)); return { nombre, ubicacion: detail ? detail.ubicacionVisible || detail.ubicacion : "", tipo: detail ? detail.tipo : "", agendaLlena: slots.every((slot) => slot.status !== "disponible"), slots }; });
   return { ok: true, fecha, timezone: CALENDAR_TIMEZONE, properties };
 }
-function buildAvailabilitySlot(fecha, hora, events) { const start = slotDate(fecha, hora); const end = addMinutes(start, APPOINTMENT_MINUTES); if (events.some((event) => rangesOverlap(start, end, event.start, event.end))) return { hora, status: "ocupado", label: "Ocupado", available: false }; const buffered = events.some((event) => rangesOverlap(start, end, addMinutes(event.start, -BUFFER_MINUTES), event.start) || rangesOverlap(start, end, event.end, addMinutes(event.end, BUFFER_MINUTES))); return buffered ? { hora, status: "buffer", label: "No disponible", available: false } : { hora, status: "disponible", label: "Disponible", available: true }; }
+function buildAvailabilitySlot(fecha, hora, events) { const start = slotDate(fecha, hora); const end = addMinutes(start, APPOINTMENT_MINUTES); return events.some((event) => rangesOverlap(start, end, event.start, event.end)) ? { hora, status: "ocupado", label: "Ocupado", available: false } : { hora, status: "disponible", label: "Disponible", available: true }; }
 function isSlotAvailable(availability, propiedad, hora) { const property = availability.properties.find((item) => normalizeTextKey(item.nombre) === normalizeTextKey(propiedad)); const slot = property && property.slots.find((item) => item.hora === hora); return Boolean(slot && slot.available); }
 
 async function fetchCalendarEvents(fecha) {
