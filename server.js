@@ -49,21 +49,21 @@ app.get("/api/citas/:folio", async (req, res) => {
 
 app.post("/api/citas", async (req, res) => {
   const { nombre, telefono, correo, tipo, fecha, hora } = req.body;
-  if (!nombre || !telefono || !correo || !tipo || !fecha || !hora) return res.status(400).json({ error: "nombre, telefono, correo, tipo, fecha y hora son obligatorios" });
-  const cita = await createAppointment(req.body);
-  res.status(201).json(cita);
+  const propiedad = resolvePropertyFromPayload(req.body);
+  if (!nombre || !telefono || !correo || !tipo || !fecha || !hora || !propiedad) return res.status(400).json({ error: "nombre, telefono, correo, propiedad, tipo, fecha y hora son obligatorios" });
+  try {
+    const cita = await createConfirmedAppointment({ ...req.body, propiedad, tipo, origen: "Formulario" });
+    res.status(201).json(toCreateResponse(cita));
+  } catch (error) {
+    handleCalendarCreateError(res, error);
+  }
 });
 
 app.patch("/api/citas/:folio", async (req, res) => {
   const cita = await findCita(req.params.folio);
   if (!cita) return res.status(404).json({ error: "Cita no encontrada" });
-  ["fecha", "hora", "estatus", "tipo", "comentarios"].forEach((field) => {
-    if (Object.prototype.hasOwnProperty.call(req.body, field)) cita[field] = clean(req.body[field]);
-  });
-  if (Object.prototype.hasOwnProperty.call(req.body, "propiedad")) {
-    cita.propiedad = normalizePropertyName(req.body.propiedad);
-    cita.ubicacion = getPropertyLocation(req.body.propiedad);
-  }
+  ["fecha", "hora", "estatus", "tipo", "comentarios"].forEach((field) => { if (Object.prototype.hasOwnProperty.call(req.body, field)) cita[field] = clean(req.body[field]); });
+  if (Object.prototype.hasOwnProperty.call(req.body, "propiedad")) { cita.propiedad = normalizePropertyName(req.body.propiedad); cita.ubicacion = getPropertyLocation(req.body.propiedad); }
   cita.updatedAt = new Date().toISOString();
   cita.whatsappUrl = buildWhatsAppUrl(cita);
   await saveAppointment(cita);
@@ -74,82 +74,53 @@ app.patch("/api/citas/:folio/cancelar", async (req, res) => {
   const cita = await findCita(req.params.folio);
   if (!cita) return res.status(404).json({ error: "Cita no encontrada" });
   const result = await cancelAppointment(cita);
-  res.json({ ...cita, ...result });
+  if (!result.ok) return res.status(503).json(result);
+  res.json(result);
 });
 
-app.get("/api/ivr/citas/:folio", async (req, res) => {
-  const cita = await findCita(req.params.folio);
-  res.json(cita ? toIvrCitaResponse(cita) : ivrNotFound());
-});
-
+app.get("/api/ivr/citas/:folio", async (req, res) => { const cita = await findCita(req.params.folio); res.json(cita ? toIvrCitaResponse(cita) : ivrNotFound()); });
 app.patch("/api/ivr/citas/:folio/cancelar", async (req, res) => {
   const cita = await findCita(req.params.folio);
   if (!cita) return res.json(ivrNotFound());
   const result = await cancelAppointment(cita);
-  res.json({ ok: true, found: true, action: "cancelar", folio: cita.folio, estatus: cita.estatus, calendarReleased: result.calendarReleased, message: "Tu cita fue cancelada correctamente." });
+  if (!result.ok) return res.status(503).json(result);
+  res.json({ ...result, found: true, action: "cancelar", message: "Tu cita fue cancelada correctamente." });
 });
-
 app.patch("/api/ivr/citas/:folio/confirmar", async (req, res) => updateIvrStatus(req, res, "Confirmada", "confirmar", "Tu asistencia fue confirmada correctamente."));
 app.patch("/api/ivr/citas/:folio/reagendar", async (req, res) => rescheduleIvr(req, res, await findCita(req.params.folio), { folio: true }));
 
-app.get("/api/ivr/clientes/:telefono/cita", async (req, res) => {
-  const cita = await findLatestCitaByTelefono(req.params.telefono);
-  res.json(cita ? toPhoneIvrCitaResponse(cita, req.params.telefono) : phoneIvrNotFound());
-});
-
+app.get("/api/ivr/clientes/:telefono/cita", async (req, res) => { const cita = await findLatestCitaByTelefono(req.params.telefono); res.json(cita ? toPhoneIvrCitaResponse(cita, req.params.telefono) : phoneIvrNotFound()); });
 app.patch("/api/ivr/clientes/:telefono/cita/confirmar", async (req, res) => {
   const cita = await findLatestCitaByTelefono(req.params.telefono);
   if (!cita) return res.json(phoneIvrNotFound());
-  cita.estatus = "Confirmada";
-  cita.updatedAt = new Date().toISOString();
-  cita.whatsappUrl = buildWhatsAppUrl(cita);
+  cita.estatus = "Confirmada"; cita.updatedAt = new Date().toISOString(); cita.whatsappUrl = buildWhatsAppUrl(cita);
   const emailResult = await sendIvrActionEmails(cita, "confirmar", "Tu cita fue confirmada correctamente.");
-  cita.emailSent = emailResult.emailSent;
-  cita.internalEmailSent = emailResult.internalEmailSent;
+  cita.emailSent = emailResult.emailSent; cita.internalEmailSent = emailResult.internalEmailSent;
   await saveAppointment(cita);
   res.json({ ok: true, found: true, action: "confirmar", telefono: clean(req.params.telefono), folio: cita.folio, estatus: cita.estatus, message: "Tu cita fue confirmada correctamente." });
 });
-
 app.patch("/api/ivr/clientes/:telefono/cita/cancelar", async (req, res) => {
   const cita = await findLatestCitaByTelefono(req.params.telefono);
   if (!cita) return res.json(phoneIvrNotFound());
   const result = await cancelAppointment(cita);
-  res.json({ ok: true, found: true, action: "cancelar", telefono: clean(req.params.telefono), folio: cita.folio, estatus: cita.estatus, calendarReleased: result.calendarReleased, message: "Tu cita fue cancelada correctamente." });
+  if (!result.ok) return res.status(503).json(result);
+  res.json({ ...result, found: true, action: "cancelar", telefono: clean(req.params.telefono), message: "Tu cita fue cancelada correctamente." });
 });
-
 app.patch("/api/ivr/clientes/:telefono/cita/reagendar", async (req, res) => rescheduleIvr(req, res, await findLatestCitaByTelefono(req.params.telefono), { telefono: clean(req.params.telefono) }));
-
 app.get("/api/ivr/propiedades/horarios", (req, res) => res.json({ ok: true, propiedades: getIvrPropertySchedules() }));
 
 app.get("/api/calendar/availability", async (req, res) => {
-  try {
-    res.json(await getCalendarAvailability(clean(req.query.fecha) || todayInCalendarTimezone()));
-  } catch (error) {
-    console.error("Disponibilidad de Calendar no disponible:", error.message);
-    res.status(503).json({ ok: false, message: "Disponibilidad temporalmente no disponible." });
-  }
+  try { res.json(await getCalendarAvailability(clean(req.query.fecha) || todayInCalendarTimezone())); }
+  catch (error) { console.error("Disponibilidad de Calendar no disponible:", error.message); res.status(503).json({ ok: false, message: "Disponibilidad temporalmente no disponible." }); }
 });
 
 app.post("/api/calendar/book", async (req, res) => {
-  const nombre = clean(req.body.nombre);
-  const telefono = clean(req.body.telefono);
-  const correo = clean(req.body.correo);
-  const propiedad = normalizePropertyName(req.body.propiedad);
-  const fecha = clean(req.body.fecha);
-  const hora = clean(req.body.hora);
+  const nombre = clean(req.body.nombre), telefono = clean(req.body.telefono), correo = clean(req.body.correo), propiedad = normalizePropertyName(req.body.propiedad), fecha = clean(req.body.fecha), hora = clean(req.body.hora);
   if (!nombre || !telefono || !correo || !propiedad || !fecha || !hora) return res.status(400).json({ error: "nombre, telefono, correo, propiedad, fecha y hora son obligatorios" });
-
   try {
-    const availability = await getCalendarAvailability(fecha);
-    if (!isSlotAvailable(availability, propiedad, hora)) return res.status(409).json({ error: "Ese horario acaba de ocuparse. Por favor selecciona otro horario disponible." });
-    const folio = await nextFolio();
-    const calendarEventId = await createCalendarEvent({ folio, nombre, telefono, correo, fecha, hora, comentarios: clean(req.body.comentarios) }, propiedad);
-    const cita = await createAppointment({ ...req.body, folio, calendarEventId, tipo: clean(req.body.tipo) || "Visita a propiedad", comentarios: appendPropertyToComments(req.body.comentarios, propiedad), propiedad });
-    res.status(201).json(cita);
-  } catch (error) {
-    console.error("No se pudo reservar en Google Calendar:", error.message);
-    res.status(503).json({ ok: false, message: "Disponibilidad temporalmente no disponible." });
-  }
+    const cita = await createConfirmedAppointment({ ...req.body, propiedad, tipo: clean(req.body.tipo) || "Visita a propiedad", comentarios: appendPropertyToComments(req.body.comentarios, propiedad), origen: "Calendario en vivo" });
+    res.status(201).json(toCreateResponse(cita));
+  } catch (error) { handleCalendarCreateError(res, error); }
 });
 
 app.post("/api/ivr/solicitudes", async (req, res) => {
@@ -164,28 +135,10 @@ app.post("/api/ivr/solicitudes", async (req, res) => {
 app.listen(PORT, () => console.log(`Citas GoTo demo escuchando en puerto ${PORT}`));
 
 function isDbEnabled() { return Boolean(process.env.DATABASE_URL); }
-function getDbPool() {
-  if (!isDbEnabled()) return null;
-  if (!dbPool) {
-    dbPool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.PGSSLMODE === "disable" ? false : { rejectUnauthorized: false } });
-    console.log("DATABASE_URL configured, using PostgreSQL storage");
-  }
-  return dbPool;
-}
+function getDbPool() { if (!isDbEnabled()) return null; if (!dbPool) { dbPool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.PGSSLMODE === "disable" ? false : { rejectUnauthorized: false } }); console.log("DATABASE_URL configured, using PostgreSQL storage"); } return dbPool; }
 async function initDbIfNeeded() { if (!getDbPool() || dbReady) return; await getDbPool().query("select 1"); dbReady = true; }
-async function withDb(operation) {
-  if (!isDbEnabled()) { console.log("DATABASE_URL not configured, using in-memory storage"); return null; }
-  try { await initDbIfNeeded(); return await operation(getDbPool()); } catch (error) { console.error("PostgreSQL unavailable, using in-memory fallback"); return null; }
-}
-
-async function nextFolio() {
-  const dbFolio = await withDb(async (pool) => {
-    const result = await pool.query("insert into folio_counters (prefix, last_number, updated_at) values ($1, 1, now()) on conflict (prefix) do update set last_number = folio_counters.last_number + 1, updated_at = now() returning last_number", ["SIC"]);
-    return `SIC-${String(result.rows[0].last_number).padStart(6, "0")}`;
-  });
-  if (dbFolio) return dbFolio;
-  const value = String(folioCounter).padStart(6, "0"); folioCounter += 1; return `SIC-${value}`;
-}
+async function withDb(operation) { if (!isDbEnabled()) { console.log("DATABASE_URL not configured, using in-memory storage"); return null; } try { await initDbIfNeeded(); return await operation(getDbPool()); } catch (error) { console.error("PostgreSQL unavailable, using in-memory fallback"); return null; } }
+async function nextFolio() { const dbFolio = await withDb(async (pool) => { const result = await pool.query("insert into folio_counters (prefix, last_number, updated_at) values ($1, 1, now()) on conflict (prefix) do update set last_number = folio_counters.last_number + 1, updated_at = now() returning last_number", ["SIC"]); return `SIC-${String(result.rows[0].last_number).padStart(6, "0")}`; }); if (dbFolio) return dbFolio; const value = String(folioCounter).padStart(6, "0"); folioCounter += 1; return `SIC-${value}`; }
 function clean(value) { return String(value || "").trim(); }
 function normalizePhone(value) { return String(value || "").replace(/\D/g, ""); }
 function comparablePhone(value) { const phone = normalizePhone(value); return phone.length > 10 ? phone.slice(-10) : phone; }
@@ -194,64 +147,35 @@ function normalizeTextKey(value) { return clean(value).normalize("NFD").replace(
 function findPropertyDetails(value) { const key = normalizeTextKey(value); return PROPERTY_DETAILS.find((property) => normalizeTextKey(property.nombre) === key || normalizeTextKey(property.nombreVisible) === key); }
 function normalizePropertyName(value) { const property = findPropertyDetails(value); return property ? property.nombreVisible || property.nombre : clean(value); }
 function getPropertyLocation(value) { const property = findPropertyDetails(value); return property ? property.ubicacionVisible || property.ubicacion : ""; }
+function resolvePropertyFromPayload(payload) { const direct = normalizePropertyName(payload.propiedad); if (direct) return direct; const match = clean(payload.comentarios).match(/Propiedad(?: seleccionada)?:\s*([^\n]+)/i); return match ? normalizePropertyName(match[1]) : "Departamento en Polanco"; }
 function toDbRow(cita) { return [cita.folio, cita.nombre, cita.telefono, cita.correo, cita.tipo, cita.propiedad, cita.ubicacion, cita.fecha, cita.hora, cita.comentarios, cita.estatus, cita.origen || "web", cita.calendarEventId || "", Boolean(cita.emailSent), Boolean(cita.internalEmailSent), false, cita.whatsappUrl || ""]; }
 function fromDbRow(row) { return { folio: row.folio, nombre: row.nombre, telefono: row.telefono, correo: row.correo, tipo: row.necesidad || "", necesidad: row.necesidad || "", propiedad: row.propiedad || "", ubicacion: row.ubicacion || "", fecha: row.fecha, hora: row.hora, comentarios: row.comentarios || "", estatus: row.estatus || "Pendiente", origen: row.origen || "web", calendarEventId: row.calendar_event_id || "", emailSent: Boolean(row.email_sent), internalEmailSent: Boolean(row.internal_email_sent), whatsappSent: Boolean(row.whatsapp_sent), whatsappUrl: row.whatsapp_url || "", createdAt: row.created_at, updatedAt: row.updated_at }; }
-async function listAppointments() {
-  const dbRows = await withDb(async (pool) => (await pool.query("select * from appointments order by created_at desc")).rows.map(fromDbRow));
-  return dbRows || citas;
-}
-async function findCita(folio) {
-  const key = clean(folio).toLowerCase();
-  const dbCita = await withDb(async (pool) => { const result = await pool.query("select * from appointments where lower(folio) = $1 limit 1", [key]); return result.rows[0] ? fromDbRow(result.rows[0]) : null; });
-  if (dbCita) return dbCita;
-  return citas.find((cita) => cita.folio.toLowerCase() === key) || null;
-}
-async function saveAppointment(cita) {
-  const saved = await withDb(async (pool) => {
-    await pool.query("insert into appointments (folio,nombre,telefono,correo,necesidad,propiedad,ubicacion,fecha,hora,comentarios,estatus,origen,calendar_event_id,email_sent,internal_email_sent,whatsapp_sent,whatsapp_url,created_at,updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,coalesce($18,now()),now()) on conflict (folio) do update set nombre=excluded.nombre, telefono=excluded.telefono, correo=excluded.correo, necesidad=excluded.necesidad, propiedad=excluded.propiedad, ubicacion=excluded.ubicacion, fecha=excluded.fecha, hora=excluded.hora, comentarios=excluded.comentarios, estatus=excluded.estatus, origen=excluded.origen, calendar_event_id=excluded.calendar_event_id, email_sent=excluded.email_sent, internal_email_sent=excluded.internal_email_sent, whatsapp_sent=excluded.whatsapp_sent, whatsapp_url=excluded.whatsapp_url, updated_at=now()", [...toDbRow(cita), cita.createdAt || null]);
-    console.log(`Appointment saved to PostgreSQL ${cita.folio}`);
-    return true;
-  });
-  if (saved) return cita;
-  const index = citas.findIndex((item) => item.folio.toLowerCase() === cita.folio.toLowerCase());
-  if (index >= 0) citas[index] = cita; else citas.push(cita);
-  console.log(`Appointment saved in memory ${cita.folio}`);
-  return cita;
-}
+async function listAppointments() { const dbRows = await withDb(async (pool) => (await pool.query("select * from appointments order by created_at desc")).rows.map(fromDbRow)); return dbRows || citas; }
+async function findCita(folio) { const key = clean(folio).toLowerCase(); const dbCita = await withDb(async (pool) => { const result = await pool.query("select * from appointments where lower(folio) = $1 limit 1", [key]); return result.rows[0] ? fromDbRow(result.rows[0]) : null; }); if (dbCita) return dbCita; return citas.find((cita) => cita.folio.toLowerCase() === key) || null; }
+async function saveAppointment(cita) { const saved = await withDb(async (pool) => { await pool.query("insert into appointments (folio,nombre,telefono,correo,necesidad,propiedad,ubicacion,fecha,hora,comentarios,estatus,origen,calendar_event_id,email_sent,internal_email_sent,whatsapp_sent,whatsapp_url,created_at,updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,coalesce($18,now()),now()) on conflict (folio) do update set nombre=excluded.nombre, telefono=excluded.telefono, correo=excluded.correo, necesidad=excluded.necesidad, propiedad=excluded.propiedad, ubicacion=excluded.ubicacion, fecha=excluded.fecha, hora=excluded.hora, comentarios=excluded.comentarios, estatus=excluded.estatus, origen=excluded.origen, calendar_event_id=excluded.calendar_event_id, email_sent=excluded.email_sent, internal_email_sent=excluded.internal_email_sent, whatsapp_sent=excluded.whatsapp_sent, whatsapp_url=excluded.whatsapp_url, updated_at=now()", [...toDbRow(cita), cita.createdAt || null]); console.log(`Appointment saved to PostgreSQL ${cita.folio}`); return true; }); if (saved) return cita; const index = citas.findIndex((item) => item.folio.toLowerCase() === cita.folio.toLowerCase()); if (index >= 0) citas[index] = cita; else citas.push(cita); console.log(`Appointment saved in memory ${cita.folio}`); return cita; }
 async function findLatestCitaByTelefono(telefono) { return (await listAppointments()).filter((cita) => phonesMatch(cita.telefono, telefono)).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null; }
 function ivrNotFound() { return { ok: true, found: false, message: "No encontramos una cita con ese folio." }; }
 function phoneIvrNotFound() { return { ok: true, found: false, message: "No encontramos una cita asociada a ese numero telefonico." }; }
 function toIvrCitaResponse(cita) { return { ok: true, found: true, folio: cita.folio, nombre: cita.nombre, telefono: cita.telefono, correo: cita.correo, tipo: cita.tipo, fecha: cita.fecha, hora: cita.hora, estatus: cita.estatus }; }
 function toPhoneIvrCitaResponse(cita, telefono) { return { ok: true, found: true, telefono: clean(telefono), folio: cita.folio, nombre: cita.nombre, correo: cita.correo, tipo: cita.tipo, fecha: cita.fecha, hora: cita.hora, estatus: cita.estatus }; }
-async function createAppointment(payload) {
-  const cita = { folio: clean(payload.folio) || await nextFolio(), nombre: clean(payload.nombre), telefono: clean(payload.telefono), correo: clean(payload.correo), tipo: clean(payload.tipo), necesidad: clean(payload.tipo), propiedad: normalizePropertyName(payload.propiedad), ubicacion: getPropertyLocation(payload.propiedad), fecha: clean(payload.fecha), hora: clean(payload.hora), comentarios: clean(payload.comentarios), estatus: clean(payload.estatus) || "Confirmada", origen: clean(payload.origen) || "web", calendarEventId: clean(payload.calendarEventId), whatsappUrl: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-  cita.whatsappUrl = buildWhatsAppUrl(cita);
-  await saveAppointment(cita);
-  const emailResult = await sendAppointmentEmails(cita);
-  cita.emailSent = emailResult.emailSent;
-  cita.internalEmailSent = emailResult.internalEmailSent;
-  await saveAppointment(cita);
-  return cita;
-}
+async function createConfirmedAppointment(payload) { const propiedad = resolvePropertyFromPayload(payload); const fecha = clean(payload.fecha); const hora = clean(payload.hora); const availability = await getCalendarAvailability(fecha); if (!isSlotAvailable(availability, propiedad, hora)) { const error = new Error("Ese horario acaba de ocuparse. Por favor selecciona otro horario disponible."); error.statusCode = 409; throw error; } const folio = clean(payload.folio) || await nextFolio(); const base = buildAppointment({ ...payload, folio, propiedad, estatus: "Confirmada" }); const calendarEventId = await createCalendarEvent(base, propiedad); if (!calendarEventId) { const error = new Error("No se pudo crear el evento en Google Calendar. Intenta de nuevo."); error.calendarRequired = true; throw error; } return createAppointment({ ...payload, folio, propiedad, calendarEventId, estatus: "Confirmada" }); }
+function buildAppointment(payload) { const propiedad = resolvePropertyFromPayload(payload); return { folio: clean(payload.folio), nombre: clean(payload.nombre), telefono: clean(payload.telefono), correo: clean(payload.correo), tipo: clean(payload.tipo), necesidad: clean(payload.tipo), propiedad, ubicacion: getPropertyLocation(propiedad), fecha: clean(payload.fecha), hora: clean(payload.hora), comentarios: clean(payload.comentarios), estatus: clean(payload.estatus) || "Confirmada", origen: clean(payload.origen) || "web", calendarEventId: clean(payload.calendarEventId), whatsappUrl: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; }
+async function createAppointment(payload) { const cita = buildAppointment({ ...payload, folio: clean(payload.folio) || await nextFolio() }); if (cita.estatus === "Confirmada" && !cita.calendarEventId) { const error = new Error("Confirmed appointment requires calendarEventId"); error.calendarRequired = true; throw error; } cita.whatsappUrl = buildWhatsAppUrl(cita); await saveAppointment(cita); const emailResult = await sendAppointmentEmails(cita); cita.emailSent = emailResult.emailSent; cita.internalEmailSent = emailResult.internalEmailSent; await saveAppointment(cita); return cita; }
+function toCreateResponse(cita) { return { ok: true, folio: cita.folio, estatus: cita.estatus, calendarEventId: cita.calendarEventId, emailSent: Boolean(cita.emailSent), internalEmailSent: Boolean(cita.internalEmailSent), whatsappUrl: cita.whatsappUrl, fecha: cita.fecha, hora: cita.hora, propiedad: cita.propiedad, tipo: cita.tipo }; }
+function handleCalendarCreateError(res, error) { if (error.statusCode === 409) return res.status(409).json({ ok: false, error: error.message }); console.error("No se pudo confirmar Google Calendar:", error.message); return res.status(503).json({ ok: false, message: "No fue posible confirmar el horario en Google Calendar. Intenta nuevamente o solicita apoyo de un asesor." }); }
 async function updateIvrStatus(req, res, estatus, action, message) { const cita = await findCita(req.params.folio); if (!cita) return res.json(ivrNotFound()); cita.estatus = estatus; cita.updatedAt = new Date().toISOString(); cita.whatsappUrl = buildWhatsAppUrl(cita); const emailResult = await sendIvrActionEmails(cita, action, message); cita.emailSent = emailResult.emailSent; cita.internalEmailSent = emailResult.internalEmailSent; await saveAppointment(cita); res.json({ ok: true, found: true, action, folio: cita.folio, estatus: cita.estatus, message }); }
 async function rescheduleIvr(req, res, cita, context) { const fecha = clean(req.body.fecha); const hora = clean(req.body.hora); if (!cita) return res.json(context.folio ? ivrNotFound() : phoneIvrNotFound()); if (!fecha || !hora) return res.status(400).json({ ok: false, error: "fecha y hora son obligatorias" }); cita.fecha = fecha; cita.hora = hora; cita.estatus = "Reagendada"; cita.updatedAt = new Date().toISOString(); cita.whatsappUrl = buildWhatsAppUrl(cita); const emailResult = await sendIvrActionEmails(cita, "reagendar", "Tu cita fue reagendada correctamente."); cita.emailSent = emailResult.emailSent; cita.internalEmailSent = emailResult.internalEmailSent; await saveAppointment(cita); res.json({ ok: true, found: true, action: "reagendar", telefono: context.telefono, folio: cita.folio, fecha: cita.fecha, hora: cita.hora, estatus: cita.estatus, message: "Tu cita fue reagendada correctamente." }); }
 function getIvrPropertySchedules() { return PROPERTY_DETAILS.map((property) => ({ id: property.id, nombre: property.nombreVisible || property.nombre, ubicacion: property.ubicacionVisible || property.ubicacion, tipo: property.tipo, disponible: Boolean(property.horario), horarios: property.horario ? [property.horario] : [], message: property.horario ? undefined : "Agenda llena" })); }
 function normalizePropertyInterest(value) { const map = { 1: "Departamento en Polanco", 2: "Casa en Coyoacán", 3: "Oficina en Santa Fe", 4: "Penthouse en Interlomas" }; const propiedad = clean(value); return normalizePropertyName(map[propiedad] || propiedad || "No especificada"); }
 function todayInCalendarTimezone() { return new Intl.DateTimeFormat("en-CA", { timeZone: CALENDAR_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
 function appendPropertyToComments(comentarios, propiedad) { const base = clean(comentarios); const line = `Propiedad: ${propiedad}`; return base.includes(line) ? base : base ? `${line}\n${base}` : line; }
-
-async function getCalendarAvailability(fecha) {
-  ensureCalendarConfig();
-  const events = await fetchCalendarEvents(fecha);
-  const properties = CALENDAR_PROPERTIES.map((nombre) => { const detail = findPropertyDetails(nombre); const slots = BASE_HOURS.map((hora) => buildAvailabilitySlot(fecha, hora, events)); return { nombre, ubicacion: detail ? detail.ubicacionVisible || detail.ubicacion : "", tipo: detail ? detail.tipo : "", agendaLlena: slots.every((slot) => slot.status !== "disponible"), slots }; });
-  return { ok: true, fecha, timezone: CALENDAR_TIMEZONE, properties };
-}
+async function getCalendarAvailability(fecha) { ensureCalendarConfig(); const events = await fetchCalendarEvents(fecha); const properties = CALENDAR_PROPERTIES.map((nombre) => { const detail = findPropertyDetails(nombre); const slots = BASE_HOURS.map((hora) => buildAvailabilitySlot(fecha, hora, events)); return { nombre, ubicacion: detail ? detail.ubicacionVisible || detail.ubicacion : "", tipo: detail ? detail.tipo : "", agendaLlena: slots.every((slot) => slot.status !== "disponible"), slots }; }); return { ok: true, fecha, timezone: CALENDAR_TIMEZONE, properties }; }
 function buildAvailabilitySlot(fecha, hora, events) { const start = slotDate(fecha, hora); const end = addMinutes(start, APPOINTMENT_MINUTES); return events.some((event) => rangesOverlap(start, end, event.start, event.end)) ? { hora, status: "ocupado", label: "Ocupado", available: false } : { hora, status: "disponible", label: "Disponible", available: true }; }
 function isSlotAvailable(availability, propiedad, hora) { const property = availability.properties.find((item) => normalizeTextKey(item.nombre) === normalizeTextKey(propiedad)); const slot = property && property.slots.find((item) => item.hora === hora); return Boolean(slot && slot.available); }
 async function fetchCalendarEvents(fecha) { const token = await getGoogleAccessToken(); const calendarId = encodeURIComponent(process.env.GOOGLE_CALENDAR_ID); const params = new URLSearchParams({ singleEvents: "true", orderBy: "startTime", timeMin: `${fecha}T00:00:00-06:00`, timeMax: `${fecha}T23:59:59-06:00` }); const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } }); if (!response.ok) throw new Error(`Google Calendar respondio ${response.status}`); const data = await response.json(); return (data.items || []).filter((event) => event.status !== "cancelled" && event.start && event.end && event.start.dateTime && event.end.dateTime).map((event) => ({ id: event.id, summary: event.summary || "", description: event.description || "", extendedProperties: event.extendedProperties || {}, start: new Date(event.start.dateTime), end: new Date(event.end.dateTime) })); }
 async function createCalendarEvent(cita, propiedad) { ensureCalendarConfig(); const token = await getGoogleAccessToken(); const calendarId = encodeURIComponent(process.env.GOOGLE_CALENDAR_ID); const startDate = slotDate(cita.fecha, cita.hora); const endDate = addMinutes(startDate, APPOINTMENT_MINUTES); const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ summary: `Visita Sicilia - ${propiedad}`, description: [`Folio: ${cita.folio}`, `Nombre: ${cita.nombre}`, `Telefono: ${cita.telefono}`, `Correo: ${cita.correo}`, `Propiedad: ${propiedad}`, `Fecha: ${cita.fecha}`, `Hora: ${cita.hora}`, cita.comentarios ? `Comentarios: ${cita.comentarios}` : ""].filter(Boolean).join("\n"), start: { dateTime: toCalendarDateTime(startDate), timeZone: CALENDAR_TIMEZONE }, end: { dateTime: toCalendarDateTime(endDate), timeZone: CALENDAR_TIMEZONE }, extendedProperties: { private: { folio: cita.folio, source: "sicilia", telefono: cita.telefono, correo: cita.correo, propiedad } } }) }); if (!response.ok) throw new Error(`Google Calendar no creo el evento: ${response.status}`); const data = await response.json(); console.log(`Calendar event created for ${cita.folio}`); return data.id; }
-async function cancelAppointment(cita) { cita.estatus = "Cancelada"; cita.updatedAt = new Date().toISOString(); cita.whatsappUrl = buildWhatsAppUrl(cita); const emailResult = await sendIvrActionEmails(cita, "cancelar", "Tu cita fue cancelada correctamente."); const calendarResult = await cancelCalendarEventForAppointment(cita); cita.emailSent = emailResult.emailSent; cita.internalEmailSent = emailResult.internalEmailSent; await saveAppointment(cita); console.log(`Appointment status updated ${cita.folio}`); return { ...emailResult, ...calendarResult }; }
-async function cancelCalendarEventForAppointment(cita) { try { ensureCalendarConfig(); } catch { return { calendarReleased: false, calendarMessage: "Google Calendar no configurado." }; } try { const eventId = cita.calendarEventId || await findCalendarEventForAppointment(cita); if (!eventId) { console.log("Calendar event not found or ambiguous for cancelled appointment"); return { calendarReleased: false, calendarMessage: "Calendar event not found or ambiguous for cancelled appointment" }; } await deleteCalendarEvent(eventId); cita.calendarEventId = ""; console.log(`Calendar event cancelled for ${cita.folio}`); return { calendarReleased: true }; } catch (error) { console.error(`Calendar event cancellation failed for ${cita.folio}: ${error.message}`); return { calendarReleased: false, calendarMessage: "No se pudo liberar Google Calendar." }; } }
+async function cancelAppointment(cita) { const calendarResult = await cancelCalendarEventForAppointment(cita); if (calendarResult.calendarBlockingError) return { ok: false, folio: cita.folio, estatus: cita.estatus, calendarReleased: false, message: "No fue posible liberar Google Calendar. La cita no se marcó como cancelada." }; cita.estatus = "Cancelada"; cita.updatedAt = new Date().toISOString(); cita.whatsappUrl = buildWhatsAppUrl(cita); const cancellationEmailSent = await sendCancellationCustomerEmail(cita); const internalCancellationEmailSent = await sendCancellationInternalEmail(cita, calendarResult); await saveAppointment(cita); console.log(`Appointment status updated ${cita.folio}`); return { ok: true, folio: cita.folio, estatus: cita.estatus, calendarReleased: calendarResult.calendarReleased, cancellationEmailSent, internalCancellationEmailSent }; }
+async function cancelCalendarEventForAppointment(cita) { try { ensureCalendarConfig(); } catch { return { calendarReleased: false, calendarBlockingError: true, calendarMessage: "Google Calendar no configurado." }; } try { const eventId = cita.calendarEventId || await findCalendarEventForAppointment(cita); if (!eventId) { console.log("Calendar event not found or ambiguous for cancelled appointment"); return { calendarReleased: false, calendarBlockingError: false, calendarMessage: "Calendar event not found or ambiguous for cancelled appointment" }; } await deleteCalendarEvent(eventId); cita.calendarEventId = ""; console.log(`Calendar event cancelled for ${cita.folio}`); return { calendarReleased: true, calendarBlockingError: false }; } catch (error) { console.error(`Calendar event cancellation failed for ${cita.folio}: ${error.message}`); return { calendarReleased: false, calendarBlockingError: true, calendarMessage: "No se pudo liberar Google Calendar." }; } }
 async function findCalendarEventForAppointment(cita) { const events = await fetchCalendarEvents(cita.fecha); const slot = slotDate(cita.fecha, cita.hora); const matches = events.filter((event) => { const text = `${event.summary}\n${event.description}\n${JSON.stringify(event.extendedProperties)}`; const sameTime = Math.abs(event.start.getTime() - slot.getTime()) < 60000; const hasFolio = cita.folio && text.includes(cita.folio); const hasCorreo = cita.correo && text.toLowerCase().includes(cita.correo.toLowerCase()); const hasTelefono = cita.telefono && normalizePhone(text).includes(comparablePhone(cita.telefono)); const hasProperty = cita.propiedad && normalizeTextKey(text).includes(normalizeTextKey(cita.propiedad)); return sameTime && (hasFolio || (hasCorreo && hasTelefono && hasProperty)); }); return matches.length === 1 ? matches[0].id : ""; }
 async function deleteCalendarEvent(eventId) { const token = await getGoogleAccessToken(); const calendarId = encodeURIComponent(process.env.GOOGLE_CALENDAR_ID); const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${encodeURIComponent(eventId)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); if (!response.ok && response.status !== 404 && response.status !== 410) throw new Error(`Google Calendar respondio ${response.status}`); }
 function ensureCalendarConfig() { if (!process.env.GOOGLE_CALENDAR_ID || !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) throw new Error("Google Calendar no configurado"); }
@@ -273,7 +197,11 @@ async function sendIvrInternalEmail(transporter, cita, fromEmail, action, messag
 async function sendIvrContactRequestEmail(solicitud) { if (!process.env.INTERNAL_NOTIFY_EMAIL) return false; const transporter = createSmtpTransporter(); if (!transporter) return false; try { await transporter.sendMail({ from: process.env.FROM_EMAIL, to: process.env.INTERNAL_NOTIFY_EMAIL, subject: `Nueva solicitud por IVR - ${BRAND_NAME}`, text: [`Telefono: ${solicitud.telefono}`, `Propiedad de interes: ${solicitud.propiedad}`, `Origen: ${solicitud.origen}`, `Fecha de solicitud: ${solicitud.createdAt}`, "Accion requerida: contactar al cliente a la brevedad"].join("\n") }); console.log("Internal notification sent for IVR request"); return true; } catch (error) { console.error(`Internal notification failed for IVR request: ${formatMailError(error)}`); return false; } }
 async function sendCustomerConfirmation(transporter, cita, fromEmail) { try { await transporter.sendMail({ from: fromEmail, to: cita.correo, subject: `Confirmacion de cita ${cita.folio} - ${BRAND_NAME}`, text: customerEmailText(cita) }); console.log(`Email confirmation sent for ${cita.folio}`); return true; } catch (error) { console.error(`Email confirmation failed for ${cita.folio}: ${formatMailError(error)}`); return false; } }
 async function sendInternalNotification(transporter, cita, fromEmail) { if (!process.env.INTERNAL_NOTIFY_EMAIL) return false; try { await transporter.sendMail({ from: fromEmail, to: process.env.INTERNAL_NOTIFY_EMAIL, subject: `Nueva cita ${BRAND_NAME} ${cita.folio}`, text: internalEmailText(cita) }); console.log(`Internal notification sent for ${cita.folio}`); return true; } catch (error) { console.error(`Internal notification failed for ${cita.folio}: ${formatMailError(error)}`); return false; } }
+async function sendCancellationCustomerEmail(cita) { if (process.env.RESEND_API_KEY) return sendResendEmail({ to: cita.correo, subject: `Cita cancelada - ${BRAND_NAME} - ${cita.folio}`, text: cancellationCustomerEmailText(cita), logOk: `Cancellation email sent for ${cita.folio}`, logFail: `Cancellation email failed for ${cita.folio}` }); const transporter = createSmtpTransporter(); if (!transporter || !cita.correo) return false; try { await transporter.sendMail({ from: process.env.FROM_EMAIL, to: cita.correo, subject: `Cita cancelada - ${BRAND_NAME} - ${cita.folio}`, text: cancellationCustomerEmailText(cita) }); console.log(`Cancellation email sent for ${cita.folio}`); return true; } catch (error) { console.error(`Cancellation email failed for ${cita.folio}: ${formatMailError(error)}`); return false; } }
+async function sendCancellationInternalEmail(cita, calendarResult) { if (process.env.RESEND_API_KEY && process.env.INTERNAL_NOTIFY_EMAIL) return sendResendEmail({ to: process.env.INTERNAL_NOTIFY_EMAIL, subject: `Cita cancelada - ${cita.folio} - ${BRAND_NAME}`, text: cancellationInternalEmailText(cita, calendarResult), logOk: `Internal cancellation notification sent for ${cita.folio}`, logFail: `Internal cancellation notification failed for ${cita.folio}` }); const transporter = createSmtpTransporter(); if (!transporter || !process.env.INTERNAL_NOTIFY_EMAIL) return false; try { await transporter.sendMail({ from: process.env.FROM_EMAIL, to: process.env.INTERNAL_NOTIFY_EMAIL, subject: `Cita cancelada - ${cita.folio} - ${BRAND_NAME}`, text: cancellationInternalEmailText(cita, calendarResult) }); console.log(`Internal cancellation notification sent for ${cita.folio}`); return true; } catch (error) { console.error(`Internal cancellation notification failed for ${cita.folio}: ${formatMailError(error)}`); return false; } }
 function customerEmailText(cita) { return [`Nombre: ${cita.nombre}`, `Folio: ${cita.folio}`, `Propiedad: ${cita.propiedad || "Por confirmar"}`, cita.ubicacion ? `Ubicacion: ${cita.ubicacion}` : "", `Tipo de cita: ${cita.tipo}`, `Fecha: ${cita.fecha}`, `Hora: ${cita.hora}`, "", "Conserva tu folio para cualquier cambio o seguimiento de tu visita.", "", `Gracias por contactar a ${BRAND_NAME}.`].filter(Boolean).join("\n"); }
 function internalEmailText(cita) { return [`Folio: ${cita.folio}`, `Nombre del cliente: ${cita.nombre}`, `Telefono: ${cita.telefono}`, `Correo: ${cita.correo}`, `Tipo de cita: ${cita.tipo}`, `Propiedad: ${cita.propiedad || "Por confirmar"}`, cita.ubicacion ? `Ubicacion: ${cita.ubicacion}` : "", `Fecha: ${cita.fecha}`, `Hora: ${cita.hora}`, `Comentarios: ${cita.comentarios || "Sin comentarios"}`, `Estatus: ${cita.estatus}`, `Fecha de creacion: ${cita.createdAt}`, cita.calendarEventId ? `Google Calendar event: ${cita.calendarEventId}` : "", `emailSent: ${Boolean(cita.emailSent)}`, `internalEmailSent: ${Boolean(cita.internalEmailSent)}`].filter(Boolean).join("\n"); }
+function cancellationCustomerEmailText(cita) { return [`Nombre: ${cita.nombre}`, `Folio: ${cita.folio}`, `Propiedad: ${cita.propiedad || "Por confirmar"}`, cita.ubicacion ? `Ubicacion: ${cita.ubicacion}` : "", `Fecha: ${cita.fecha}`, `Hora: ${cita.hora}`, "Estatus: Cancelada", "", "Tu cita ha sido cancelada correctamente."].filter(Boolean).join("\n"); }
+function cancellationInternalEmailText(cita, calendarResult) { return [`Folio: ${cita.folio}`, `Nombre del cliente: ${cita.nombre}`, `Telefono: ${cita.telefono}`, `Correo: ${cita.correo}`, `Propiedad: ${cita.propiedad || "Por confirmar"}`, cita.ubicacion ? `Ubicacion: ${cita.ubicacion}` : "", `Fecha: ${cita.fecha}`, `Hora: ${cita.hora}`, `Comentarios: ${cita.comentarios || "Sin comentarios"}`, `Origen: ${cita.origen || "web"}`, "Estatus: Cancelada", `Calendar event id: ${cita.calendarEventId || "No disponible"}`, `CalendarReleased: ${Boolean(calendarResult.calendarReleased)}`].filter(Boolean).join("\n"); }
 function serveBrandedHtml(res, filename) { fs.readFile(path.join(__dirname, "public", filename), "utf8", (error, html) => { if (error) return res.status(500).send("No se pudo cargar la pagina."); res.type("html").send(applySiciliaBrand(html)); }); }
 function applySiciliaBrand(html) { return html.replace(/Inmobiliaria Carvalho/g, BRAND_NAME).replace(/Panel asesor Carvalho/g, "Panel asesor Sicilia").replace(/Carvalho/g, BRAND_SHORT).replace(/CITA-100/g, "SIC-100").replace(/Visita Carvalho/g, "Visita Sicilia").replace(/IVR GoTo conectado a agenda externa/g, "agenda de visitas inmobiliarias"); }
