@@ -34,6 +34,64 @@ app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/healthz", (req, res) => res.type("text/plain").send("ok"));
 
+app.post("/api/validate-folio", async (req, res) => {
+  const normalizedFolio = normalizeValidationFolio(req.body.folio);
+
+  if (!normalizedFolio) {
+    return res.json({
+      ok: false,
+      found: false,
+      message: "Folio requerido"
+    });
+  }
+
+  if (!dbPool) {
+    return res.status(503).json({
+      ok: false,
+      found: false,
+      searchedFolio: normalizedFolio,
+      message: "Base de datos no disponible"
+    });
+  }
+
+  try {
+    const result = await dbPool.query(
+      "select id, folio, nombre, telefono, correo from appointments where lower(folio) = lower($1) limit 1",
+      [normalizedFolio]
+    );
+
+    if (!result.rows[0]) {
+      return res.json({
+        ok: true,
+        found: false,
+        searchedFolio: normalizedFolio,
+        message: "Folio no encontrado"
+      });
+    }
+
+    const appointment = result.rows[0];
+
+    return res.json({
+      ok: true,
+      found: true,
+      id: appointment.id,
+      folio: appointment.folio,
+      nombre: appointment.nombre,
+      telefono: appointment.telefono,
+      correo: appointment.correo,
+      message: "Folio encontrado"
+    });
+  } catch (error) {
+    console.error("No se pudo validar el folio:", error.message);
+    return res.status(500).json({
+      ok: false,
+      found: false,
+      searchedFolio: normalizedFolio,
+      message: "No fue posible validar el folio"
+    });
+  }
+});
+
 app.get("/api/citas", async (req, res) => {
   const q = clean(req.query.q).toLowerCase();
   const rows = await listAppointments();
@@ -140,6 +198,7 @@ async function initDbIfNeeded() { if (!getDbPool() || dbReady) return; await get
 async function withDb(operation) { if (!isDbEnabled()) { console.log("DATABASE_URL not configured, using in-memory storage"); return null; } try { await initDbIfNeeded(); return await operation(getDbPool()); } catch (error) { console.error("PostgreSQL unavailable, using in-memory fallback"); return null; } }
 async function nextFolio() { const dbFolio = await withDb(async (pool) => { const result = await pool.query("insert into folio_counters (prefix, last_number, updated_at) values ($1, 1, now()) on conflict (prefix) do update set last_number = folio_counters.last_number + 1, updated_at = now() returning last_number", ["SIC"]); return `SIC-${String(result.rows[0].last_number).padStart(6, "0")}`; }); if (dbFolio) return dbFolio; const value = String(folioCounter).padStart(6, "0"); folioCounter += 1; return `SIC-${value}`; }
 function clean(value) { return String(value || "").trim(); }
+function normalizeValidationFolio(value) { const raw = clean(value).toUpperCase(); if (!raw) return ""; const numericPart = raw.replace(/^SIC-?/, "").replace(/\D/g, ""); return numericPart ? `SIC-${numericPart.padStart(6, "0")}` : ""; }
 function normalizePhone(value) { return String(value || "").replace(/\D/g, ""); }
 function comparablePhone(value) { const phone = normalizePhone(value); return phone.length > 10 ? phone.slice(-10) : phone; }
 function phonesMatch(left, right) { const l = normalizePhone(left); const r = normalizePhone(right); return Boolean(l && r && (l === r || comparablePhone(l) === comparablePhone(r))); }
