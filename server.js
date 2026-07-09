@@ -45,17 +45,26 @@ app.post("/api/validate-folio", async (req, res) => {
     });
   }
 
-  if (!dbPool) {
-    return res.status(503).json({
-      ok: false,
-      found: false,
-      searchedFolio: normalizedFolio,
-      message: "Base de datos no disponible"
-    });
-  }
+  const pool = getDbPool();
+
+if (!pool) {
+  return res.status(503).json({
+    ok: false,
+    found: false,
+    searchedFolio: normalizedFolio,
+    message: "Base de datos no disponible"
+  });
+}
+    
+      
+      
+      
+      
+    
+  
 
   try {
-    const result = await dbPool.query(
+    const result = await pool.query(
       "select id, folio, nombre, telefono, correo from appointments where lower(folio) = lower($1) limit 1",
       [normalizedFolio]
     );
